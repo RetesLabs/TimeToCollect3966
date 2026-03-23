@@ -2,7 +2,6 @@ import { useState, useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
 import LoginModal from '../components/LoginModal'
 import NuevoCobro from '../components/NuevoCobro'
-import TablaDeptos from '../components/TablaDeptos'
 import { CACHE_KEYS } from '../api/cache'
 import useCachedData from '../hooks/useCachedData'
 import {
@@ -19,7 +18,6 @@ const TABS = [
   { key: 'crear', label: 'Crear Cobro' },
   { key: 'pagos', label: 'Gestionar Pagos' },
   { key: 'deptos', label: 'Gestionar Departamentos' },
-  { key: 'comprobantes', label: 'Comprobantes' },
 ]
 
 function Admin() {
@@ -56,7 +54,6 @@ function Admin() {
         {activeTab === 'crear' && <TabCrearCobro adminPassword={adminPassword} />}
         {activeTab === 'pagos' && <TabGestionarPagos adminPassword={adminPassword} />}
         {activeTab === 'deptos' && <TabGestionarDeptos adminPassword={adminPassword} />}
-        {activeTab === 'comprobantes' && <TabComprobantes />}
       </div>
     </div>
   )
@@ -700,129 +697,6 @@ function TabGestionarDeptos({ adminPassword }) {
                 </tr>
               )
             })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
-/* --- Tab: Comprobantes --- */
-function TabComprobantes() {
-  const fetchHistorico = useCallback(() => getHistorico().catch(() => []), [])
-  const fetchCobroActual = useCallback(() => getCobroActual().catch(() => null), [])
-
-  const {
-    data: historicoRaw,
-    loading: loadingH,
-    refreshing: refreshingH,
-    error: errorH,
-  } = useCachedData(CACHE_KEYS.historico, fetchHistorico)
-
-  const {
-    data: cobroActualData,
-    loading: loadingCA,
-    refreshing: refreshingCA,
-  } = useCachedData(CACHE_KEYS.cobroActual, fetchCobroActual)
-
-  const loading = loadingH || loadingCA
-  const refreshing = refreshingH || refreshingCA
-
-  // Build cobros list
-  const cobros = (() => {
-    let allCobros = Array.isArray(historicoRaw)
-      ? [...historicoRaw]
-      : [...(historicoRaw?.cobros || [])]
-
-    if (cobroActualData) {
-      const currentId = cobroActualData.id || cobroActualData.cobroId
-      const alreadyExists = allCobros.some(
-        (c) => (c.id || c.cobroId) === currentId
-      )
-      if (!alreadyExists) {
-        allCobros.unshift(cobroActualData)
-      }
-    }
-
-    allCobros.sort((a, b) => (b.mes || '').localeCompare(a.mes || ''))
-    return allCobros
-  })()
-
-  if (loading) {
-    return (
-      <div className="loading-spinner">
-        <div className="spinner" />
-        <p>Cargando comprobantes...</p>
-      </div>
-    )
-  }
-
-  if (errorH) {
-    return (
-      <div className="error-message">
-        <p>{errorH}</p>
-      </div>
-    )
-  }
-
-  // Collect all comprobantes from all cobros
-  const comprobantes = []
-  cobros.forEach((cobro) => {
-    const pagos = cobro.pagos || []
-    pagos.forEach((pago) => {
-      if (pago.comprobante || pago.comprobanteUrl) {
-        comprobantes.push({
-          mes: cobro.mes,
-          depto: pago.depto,
-          url: pago.comprobanteUrl || pago.comprobante,
-          nombreArchivo: pago.nombreArchivo || 'Comprobante',
-        })
-      }
-    })
-  })
-
-  if (comprobantes.length === 0) {
-    return (
-      <div className="empty-state">
-        {refreshing && <div className="refreshing-bar" />}
-        <p>No hay comprobantes subidos.</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="comprobantes-list">
-      {refreshing && <div className="refreshing-bar" />}
-
-      <h3>Comprobantes Subidos</h3>
-      <div className="tabla-deptos-wrapper">
-        <table className="tabla-deptos">
-          <thead>
-            <tr>
-              <th>Mes</th>
-              <th>Depto</th>
-              <th>Archivo</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {comprobantes.map((comp, index) => (
-              <tr key={`${comp.mes}-${comp.depto}-${index}`}>
-                <td>{formatMesAnio(comp.mes)}</td>
-                <td>{comp.depto}</td>
-                <td>{comp.nombreArchivo}</td>
-                <td>
-                  <a
-                    href={comp.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="btn btn--sm btn--secondary"
-                  >
-                    Ver Comprobante
-                  </a>
-                </td>
-              </tr>
-            ))}
           </tbody>
         </table>
       </div>

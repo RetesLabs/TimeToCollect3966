@@ -166,26 +166,6 @@ export async function activarMes(cobroId, password) {
 }
 
 /**
- * Sube un comprobante de pago (imagen) convertido a base64.
- * @param {string} cobroId - ID del cobro
- * @param {string|number} depto - Número de departamento
- * @param {File} file - Archivo de imagen seleccionado por el usuario
- */
-export async function subirComprobante(cobroId, depto, file) {
-  const base64 = await fileToBase64(file)
-
-  const result = await postAPI('subirComprobante', {
-    cobroId,
-    depto: Number(depto),
-    fileData: base64,
-    fileName: file.name,
-  })
-  clearCache(CACHE_KEYS.cobroActual)
-  clearCache(CACHE_KEYS.historico)
-  return result
-}
-
-/**
  * Verifica la contraseña del administrador.
  * @param {string} password - Contraseña a verificar
  */
@@ -197,18 +177,3 @@ export async function login(password) {
   return { success: true }
 }
 
-/**
- * Convierte un File a string base64.
- */
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      // result is "data:<mime>;base64,<data>" — extract the base64 part
-      const base64String = reader.result.split(',')[1]
-      resolve(base64String)
-    }
-    reader.onerror = (error) => reject(error)
-    reader.readAsDataURL(file)
-  })
-}

@@ -1,14 +1,11 @@
-import { useState, useCallback } from 'react'
+import { useCallback } from 'react'
 import { getCobroActual, getDepartamentos } from '../api/sheets'
 import { CACHE_KEYS } from '../api/cache'
 import useCachedData from '../hooks/useCachedData'
 import TablaDeptos from '../components/TablaDeptos'
-import ModalComprobante from '../components/ModalComprobante'
 import { formatPesos, formatMesAnio } from '../utils/format'
 
 function MesActual() {
-  const [comprobanteModal, setComprobanteModal] = useState(null)
-
   const fetchCobro = useCallback(() => getCobroActual(), [])
   const fetchDeptos = useCallback(() => getDepartamentos(), [])
 
@@ -32,19 +29,6 @@ function MesActual() {
   const refreshing = refreshingCobro || refreshingDeptos
   const error = errorCobro || errorDeptos
   const departamentos = Array.isArray(deptosRaw) ? deptosRaw : (deptosRaw?.departamentos || [])
-
-  const handleOpenComprobante = (dept) => {
-    setComprobanteModal({
-      cobroId: cobro.id || cobro.cobroId,
-      depto: dept.depto,
-      mes: formatMesAnio(cobro.mes),
-    })
-  }
-
-  const handleComprobanteSuccess = () => {
-    setComprobanteModal(null)
-    refetchCobro()
-  }
 
   if (loading) {
     return (
@@ -85,7 +69,12 @@ function MesActual() {
 
   // getCobroActual returns payment info merged into cobro.departamentos, not cobro.pagos
   const pagos = cobro.departamentos || cobro.pagos || []
-  const totalRecaudado = pagos.reduce((sum, p) => sum + (Number(p.montoPagado) || 0), 0)
+  // Only count "pagado" status towards recaudado, exclude "adelanto"
+  const totalRecaudado = pagos.reduce((sum, p) => {
+    const status = (p.status || '').toLowerCase()
+    if (status === 'pagado') return sum + (Number(p.montoPagado) || 0)
+    return sum
+  }, 0)
   const deptosActivos = departamentos.filter((d) => d.activo).length
   const totalEsperado = deptosActivos * (cobro.montoBase || 0)
 
@@ -123,26 +112,7 @@ function MesActual() {
         departamentos={departamentos}
         pagos={pagos}
         montoBase={cobro.montoBase || 0}
-        renderActions={(dept) => (
-          <button
-            className="btn btn--sm btn--secondary"
-            onClick={() => handleOpenComprobante(dept)}
-            title="Subir comprobante de pago"
-          >
-            Subir Comprobante
-          </button>
-        )}
       />
-
-      {comprobanteModal && (
-        <ModalComprobante
-          cobroId={comprobanteModal.cobroId}
-          depto={comprobanteModal.depto}
-          mes={comprobanteModal.mes}
-          onClose={() => setComprobanteModal(null)}
-          onSuccess={handleComprobanteSuccess}
-        />
-      )}
     </div>
   )
 }

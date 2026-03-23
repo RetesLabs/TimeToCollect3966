@@ -42,7 +42,7 @@ function TablaDeptos({ departamentos = [], pagos = [], montoBase = 0, renderActi
           <tr>
             <th># Depto</th>
             <th>Residente</th>
-            <th>Monto</th>
+            <th>Por Pagar</th>
             <th>Status</th>
             <th>Saldo a Favor</th>
             {renderActions && <th>Acciones</th>}
@@ -61,11 +61,7 @@ function TablaDeptos({ departamentos = [], pagos = [], montoBase = 0, renderActi
                 <td>{dept.depto}</td>
                 <td>{dept.nombre || '—'}</td>
                 <td>
-                  {pago
-                    ? formatPesos(pago.montoPagado || 0)
-                    : formatPesos(0)}
-                  {' / '}
-                  {formatPesos(montoBase)}
+                  {formatPesos(pago ? (Number(pago.montoAdeudo) || 0) : montoBase)}
                 </td>
                 <td>{getStatusBadge(pago, dept.activo)}</td>
                 <td>{formatPesos(dept.saldoFavor || 0)}</td>

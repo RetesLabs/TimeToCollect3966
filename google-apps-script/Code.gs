@@ -10,7 +10,6 @@
 var SHEET_DEPTOS = 'Departamentos';
 var SHEET_COBROS = 'Cobros';
 var SHEET_PAGOS  = 'Pagos';
-var DRIVE_FOLDER_NAME = 'Comprobantes3966';
 
 // ---------------------------------------------------------------------------
 // Web-app entry points
@@ -76,9 +75,6 @@ function doPost(e) {
         break;
       case 'activarMes':
         result = requireAdmin(body, function () { return activarMes(body); });
-        break;
-      case 'subirComprobante':
-        result = subirComprobante(body);
         break;
       default:
         result = { success: false, error: 'Accion POST no reconocida: ' + action };
@@ -596,129 +592,7 @@ function actualizarDepto(body) {
 }
 
 // ---------------------------------------------------------------------------
-// 7. subirComprobante (POST — Public)
-// ---------------------------------------------------------------------------
-
-/**
- * Upload a proof-of-payment image (base64) to Google Drive and store the URL
- * in the corresponding Pagos row.
- * Body params: cobroId, depto, fileData (base64 string), fileName.
- */
-function subirComprobante(body) {
-  var cobroId  = body.cobroId;
-  var depto    = body.depto;
-  var fileData = body.fileData;
-  var fileName = body.fileName;
-
-  if (!cobroId || depto === undefined || depto === null || depto === '') {
-    return { success: false, error: 'cobroId y depto son obligatorios.' };
-  }
-  if (!fileData || !fileName) {
-    return { success: false, error: 'fileData y fileName son obligatorios.' };
-  }
-
-  // Find or create pago row for this cobro + depto
-  var pagosSheet = getSheet(SHEET_PAGOS);
-  var pagosData = pagosSheet.getDataRange().getValues();
-  var pagoRowIndex = -1;
-  for (var p = 1; p < pagosData.length; p++) {
-    if (String(pagosData[p][1]) === String(cobroId) && String(pagosData[p][2]) === String(depto)) {
-      pagoRowIndex = p + 1; // 1-based
-      break;
-    }
-  }
-
-  if (pagoRowIndex === -1) {
-    // Create a placeholder pago row so the comprobante has somewhere to live
-    var pagoId = Utilities.getUuid();
-    var cobrosObjs = sheetToObjects(SHEET_COBROS);
-    var montoBase = 0;
-    for (var c = 0; c < cobrosObjs.length; c++) {
-      if (String(cobrosObjs[c].id) === String(cobroId)) {
-        montoBase = parseFloat(cobrosObjs[c].montoBase) || 0;
-        break;
-      }
-    }
-    appendRow(SHEET_PAGOS, [
-      pagoId,
-      cobroId,
-      depto,
-      0,          // montoPagado
-      montoBase,  // montoAdeudo
-      0,          // saldoFavorUsado
-      '',         // fechaPago
-      '',         // comprobante — will be set below
-      'pendiente' // status
-    ]);
-    // Re-read to find the new row
-    pagosData = pagosSheet.getDataRange().getValues();
-    for (var q = 1; q < pagosData.length; q++) {
-      if (String(pagosData[q][1]) === String(cobroId) && String(pagosData[q][2]) === String(depto)) {
-        pagoRowIndex = q + 1;
-        break;
-      }
-    }
-  }
-
-  // Decode base64 and save to Drive
-  var blob;
-  try {
-    var decoded = Utilities.base64Decode(fileData);
-    blob = Utilities.newBlob(decoded, getMimeType(fileName), fileName);
-  } catch (err) {
-    return { success: false, error: 'Error al decodificar el archivo: ' + err.message };
-  }
-
-  var folder = getOrCreateDriveFolder(DRIVE_FOLDER_NAME);
-  var uniqueName = depto + '_' + cobroId.substring(0, 8) + '_' + fileName;
-  blob.setName(uniqueName);
-  var file = folder.createFile(blob);
-  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  var fileUrl = file.getUrl();
-
-  // Write URL into the comprobante column (column H = index 8, 1-based)
-  pagosSheet.getRange(pagoRowIndex, 8).setValue(fileUrl);
-
-  return {
-    success: true,
-    data: {
-      comprobanteUrl: fileUrl,
-      cobroId: cobroId,
-      depto: depto
-    }
-  };
-}
-
-/**
- * Infer MIME type from file extension.
- */
-function getMimeType(fileName) {
-  var ext = (fileName || '').split('.').pop().toLowerCase();
-  var mimeTypes = {
-    'png':  'image/png',
-    'jpg':  'image/jpeg',
-    'jpeg': 'image/jpeg',
-    'gif':  'image/gif',
-    'webp': 'image/webp',
-    'pdf':  'application/pdf',
-    'bmp':  'image/bmp'
-  };
-  return mimeTypes[ext] || 'application/octet-stream';
-}
-
-/**
- * Get an existing Drive folder by name or create it.
- */
-function getOrCreateDriveFolder(folderName) {
-  var folders = DriveApp.getFoldersByName(folderName);
-  if (folders.hasNext()) {
-    return folders.next();
-  }
-  return DriveApp.createFolder(folderName);
-}
-
-// ---------------------------------------------------------------------------
-// 8. login (POST)
+// 7. login (POST)
 // ---------------------------------------------------------------------------
 
 /**
