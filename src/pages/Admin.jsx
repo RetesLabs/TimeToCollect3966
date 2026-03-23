@@ -11,6 +11,7 @@ import {
   getCobroActual,
   registrarPago,
   actualizarDepto,
+  activarMes,
 } from '../api/sheets'
 import { formatPesos, formatMesAnio } from '../utils/format'
 
@@ -52,7 +53,7 @@ function Admin() {
       </div>
 
       <div className="admin-tab-content">
-        {activeTab === 'crear' && <TabCrearCobro />}
+        {activeTab === 'crear' && <TabCrearCobro adminPassword={adminPassword} />}
         {activeTab === 'pagos' && <TabGestionarPagos adminPassword={adminPassword} />}
         {activeTab === 'deptos' && <TabGestionarDeptos adminPassword={adminPassword} />}
         {activeTab === 'comprobantes' && <TabComprobantes />}
@@ -61,9 +62,109 @@ function Admin() {
   )
 }
 
-/* --- Tab: Crear Cobro --- */
-function TabCrearCobro() {
-  return <NuevoCobro onSuccess={() => {}} />
+/* --- Tab: Crear Cobro + Mes Activo --- */
+function TabCrearCobro({ adminPassword }) {
+  const [activating, setActivating] = useState(null)
+  const [activateMsg, setActivateMsg] = useState(null)
+
+  const fetchHistorico = useCallback(() => getHistorico().catch(() => []), [])
+  const {
+    data: historicoRaw,
+    loading,
+    refetch: refetchH,
+  } = useCachedData(CACHE_KEYS.historico, fetchHistorico)
+
+  const cobros = (() => {
+    if (!historicoRaw) return []
+    const list = Array.isArray(historicoRaw) ? historicoRaw : (historicoRaw.cobros || [])
+    return [...list].sort((a, b) => (b.mes || '').localeCompare(a.mes || ''))
+  })()
+
+  const handleActivar = async (cobroId, mes) => {
+    setActivating(cobroId)
+    setActivateMsg(null)
+    try {
+      await activarMes(cobroId, adminPassword)
+      setActivateMsg({ type: 'success', text: `${formatMesAnio(mes)} activado.` })
+      refetchH()
+    } catch (err) {
+      setActivateMsg({ type: 'error', text: err.message || 'Error al activar mes.' })
+    } finally {
+      setActivating(null)
+    }
+  }
+
+  return (
+    <div>
+      <NuevoCobro onSuccess={() => refetchH()} />
+
+      <div style={{ marginTop: '2rem' }}>
+        <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: '0.75rem' }}>Mes Activo</h3>
+        <p style={{ fontSize: '0.85rem', color: 'var(--color-gray-500)', marginBottom: '0.75rem' }}>
+          El mes activo es el que se muestra en la pantalla principal. Solo un mes puede estar activo a la vez.
+        </p>
+
+        {activateMsg && (
+          <div className={`form-message form-message--${activateMsg.type}`} style={{ marginBottom: '0.75rem' }}>
+            {activateMsg.text}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="loading-spinner"><div className="spinner" /><p>Cargando...</p></div>
+        ) : cobros.length === 0 ? (
+          <p className="text-muted">No hay cobros creados.</p>
+        ) : (
+          <div className="tabla-deptos-wrapper">
+            <table className="tabla-deptos">
+              <thead>
+                <tr>
+                  <th>Mes</th>
+                  <th>Monto Base</th>
+                  <th>Mes Activo</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cobros.map((cobro) => {
+                  const cobroId = cobro.id || cobro.cobroId
+                  const isActive = cobro.mesActivo === true || cobro.mesActivo === 'true'
+                  const isActivating = activating === cobroId
+
+                  return (
+                    <tr key={cobroId}>
+                      <td style={{ fontWeight: isActive ? 700 : 400 }}>
+                        {formatMesAnio(cobro.mes)}
+                      </td>
+                      <td>{formatPesos(cobro.montoBase)}</td>
+                      <td>
+                        {isActive ? (
+                          <span className="badge badge--paid">Activo</span>
+                        ) : (
+                          <span className="badge badge--inactive">Inactivo</span>
+                        )}
+                      </td>
+                      <td>
+                        {!isActive && (
+                          <button
+                            className="btn btn--sm btn--primary"
+                            onClick={() => handleActivar(cobroId, cobro.mes)}
+                            disabled={isActivating}
+                          >
+                            {isActivating ? 'Activando...' : 'Activar'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
 
 /* --- Tab: Gestionar Pagos --- */
@@ -133,12 +234,51 @@ function TabGestionarPagos({ adminPassword }) {
     (c) => (c.id || c.cobroId || c.mes) === effectiveCobroId
   )
 
+  const montoBase = selectedCobro ? (selectedCobro.montoBase || 0) : 0
+
   const handlePagoInputChange = (depto, field, value) => {
+    setPagoForms((prev) => {
+      const current = prev[depto] || {}
+      const updated = { ...current, [field]: value }
+
+      // Auto-calculate montoAdeudo when montoPagado or saldoFavorUsado changes
+      if (field === 'montoPagado' || field === 'saldoFavorUsado') {
+        const pagado = parseFloat(field === 'montoPagado' ? value : (current.montoPagado || 0)) || 0
+        const sfUsado = parseFloat(field === 'saldoFavorUsado' ? value : (current.saldoFavorUsado || 0)) || 0
+        const adeudo = Math.max(0, montoBase - pagado - sfUsado)
+        updated.montoAdeudo = adeudo > 0 ? String(adeudo) : '0'
+
+        // Auto-set status
+        if (pagado + sfUsado > montoBase) {
+          updated.status = 'adelanto'
+        } else {
+          updated.status = updated.status === 'adelanto' ? 'pagado' : (current.status || 'pagado')
+        }
+      }
+
+      return { ...prev, [depto]: updated }
+    })
+  }
+
+  const handleStatusChange = (depto, value) => {
+    setPagoForms((prev) => ({
+      ...prev,
+      [depto]: { ...(prev[depto] || {}), status: value },
+    }))
+  }
+
+  // Quick fill: set montoPagado = montoBase for a depto
+  const handleQuickFill = (depto, saldoFavor) => {
+    const sfUsado = saldoFavor > 0 ? Math.min(saldoFavor, montoBase) : 0
+    const montoPagado = montoBase - sfUsado
+    const adeudo = 0
     setPagoForms((prev) => ({
       ...prev,
       [depto]: {
-        ...(prev[depto] || {}),
-        [field]: value,
+        montoPagado: String(montoPagado),
+        montoAdeudo: '0',
+        saldoFavorUsado: sfUsado > 0 ? String(sfUsado) : '0',
+        status: 'pagado',
       },
     }))
   }
@@ -148,6 +288,12 @@ function TabGestionarPagos({ adminPassword }) {
     const montoPagado = parseFloat(form.montoPagado) || 0
     const montoAdeudo = parseFloat(form.montoAdeudo) || 0
     const saldoFavorUsado = parseFloat(form.saldoFavorUsado) || 0
+    const status = form.status || 'pagado'
+
+    if (montoPagado <= 0 && saldoFavorUsado <= 0) {
+      setSaveMessage({ depto: dept.depto, type: 'error', text: 'Ingresa un monto pagado.' })
+      return
+    }
 
     setSavingDepto(dept.depto)
     setSaveMessage(null)
@@ -159,9 +305,12 @@ function TabGestionarPagos({ adminPassword }) {
         montoPagado,
         montoAdeudo,
         saldoFavorUsado,
-        adminPassword
+        adminPassword,
+        status
       )
       setSaveMessage({ depto: dept.depto, type: 'success', text: 'Pago registrado.' })
+      // Clear form for this depto
+      setPagoForms((prev) => ({ ...prev, [dept.depto]: {} }))
       refetchH()
       refetchCA()
       refetchD()
@@ -234,21 +383,28 @@ function TabGestionarPagos({ adminPassword }) {
                 <tr>
                   <th># Depto</th>
                   <th>Residente</th>
+                  <th>Saldo a Favor</th>
                   <th>Estado Actual</th>
                   <th>Monto Pagado</th>
-                  <th>Monto Adeudo</th>
+                  <th>Adeudo</th>
                   <th>Saldo Favor Usado</th>
+                  <th>Tipo</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
               <tbody>
                 {departamentos.map((dept) => {
                   const pagos = selectedCobro.pagos || []
-                  const pagoExistente = pagos.find((p) => Number(p.depto) === Number(dept.depto))
+                  const deptoDetalle = (selectedCobro.departamentos || []).find(
+                    (d) => Number(d.depto) === Number(dept.depto)
+                  )
+                  const pagoExistente = deptoDetalle || pagos.find((p) => Number(p.depto) === Number(dept.depto))
                   const form = pagoForms[dept.depto] || {}
                   const isSaving = savingDepto === dept.depto
                   const msg =
                     saveMessage && saveMessage.depto === dept.depto ? saveMessage : null
+                  const saldoFavor = Number(dept.saldoFavor) || 0
+                  const statusActual = pagoExistente?.status || 'pendiente'
 
                   return (
                     <tr
@@ -258,15 +414,30 @@ function TabGestionarPagos({ adminPassword }) {
                       <td>{dept.depto}</td>
                       <td>{dept.nombre || '—'}</td>
                       <td>
-                        {pagoExistente ? (
-                          <span>
-                            Pagado: {formatPesos(pagoExistente.montoPagado || 0)}
-                            {pagoExistente.montoAdeudo > 0 && (
-                              <> | Adeudo: {formatPesos(pagoExistente.montoAdeudo)}</>
-                            )}
-                          </span>
+                        {saldoFavor > 0 ? (
+                          <span className="badge badge--advance">{formatPesos(saldoFavor)}</span>
                         ) : (
-                          <span className="text-muted">Sin pago</span>
+                          <span className="text-muted">$0</span>
+                        )}
+                      </td>
+                      <td>
+                        {statusActual === 'pagado' && (
+                          <span className="badge badge--paid">
+                            Pagado {formatPesos(pagoExistente?.montoPagado || 0)}
+                          </span>
+                        )}
+                        {statusActual === 'adelanto' && (
+                          <span className="badge badge--advance">
+                            Adelanto {formatPesos(pagoExistente?.montoPagado || 0)}
+                          </span>
+                        )}
+                        {statusActual === 'pendiente' && (
+                          <span className="badge badge--pending">Pendiente</span>
+                        )}
+                        {pagoExistente && Number(pagoExistente.montoAdeudo) > 0 && (
+                          <div style={{ fontSize: '0.72rem', color: 'var(--color-danger)', marginTop: 2 }}>
+                            Adeudo: {formatPesos(pagoExistente.montoAdeudo)}
+                          </div>
                         )}
                       </td>
                       <td>
@@ -274,7 +445,7 @@ function TabGestionarPagos({ adminPassword }) {
                           type="number"
                           min="0"
                           step="0.01"
-                          placeholder="0.00"
+                          placeholder={String(montoBase)}
                           value={form.montoPagado ?? ''}
                           onChange={(e) =>
                             handlePagoInputChange(dept.depto, 'montoPagado', e.target.value)
@@ -288,7 +459,7 @@ function TabGestionarPagos({ adminPassword }) {
                           type="number"
                           min="0"
                           step="0.01"
-                          placeholder="0.00"
+                          placeholder="auto"
                           value={form.montoAdeudo ?? ''}
                           onChange={(e) =>
                             handlePagoInputChange(dept.depto, 'montoAdeudo', e.target.value)
@@ -301,24 +472,47 @@ function TabGestionarPagos({ adminPassword }) {
                         <input
                           type="number"
                           min="0"
+                          max={saldoFavor}
                           step="0.01"
-                          placeholder="0.00"
+                          placeholder="0"
                           value={form.saldoFavorUsado ?? ''}
                           onChange={(e) =>
                             handlePagoInputChange(dept.depto, 'saldoFavorUsado', e.target.value)
                           }
-                          disabled={isSaving || !dept.activo}
+                          disabled={isSaving || !dept.activo || saldoFavor <= 0}
                           className="input-sm"
                         />
                       </td>
                       <td>
-                        <button
-                          className="btn btn--sm btn--primary"
-                          onClick={() => handleRegistrarPago(dept)}
+                        <select
+                          value={form.status || 'pagado'}
+                          onChange={(e) => handleStatusChange(dept.depto, e.target.value)}
                           disabled={isSaving || !dept.activo}
+                          className="input-sm"
+                          style={{ width: '90px' }}
                         >
-                          {isSaving ? 'Guardando...' : 'Registrar Pago'}
-                        </button>
+                          <option value="pagado">Pagado</option>
+                          <option value="adelanto">Adelanto</option>
+                        </select>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: '0.3rem', flexDirection: 'column' }}>
+                          <button
+                            className="btn btn--sm btn--secondary"
+                            onClick={() => handleQuickFill(dept.depto, saldoFavor)}
+                            disabled={isSaving || !dept.activo}
+                            title="Llenar con monto base completo"
+                          >
+                            Pago completo
+                          </button>
+                          <button
+                            className="btn btn--sm btn--primary"
+                            onClick={() => handleRegistrarPago(dept)}
+                            disabled={isSaving || !dept.activo}
+                          >
+                            {isSaving ? 'Guardando...' : 'Registrar'}
+                          </button>
+                        </div>
                         {msg && (
                           <div className={`form-message form-message--${msg.type} form-message--inline`}>
                             {msg.text}

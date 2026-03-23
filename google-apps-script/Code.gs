@@ -7,10 +7,6 @@
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-// ⚠️ IMPORTANT: Set your Google Spreadsheet ID here.
-// Find it in the URL: https://docs.google.com/spreadsheets/d/YOUR_ID_HERE/edit
-var SPREADSHEET_ID = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID') || '';
-
 var SHEET_DEPTOS = 'Departamentos';
 var SHEET_COBROS = 'Cobros';
 var SHEET_PAGOS  = 'Pagos';
@@ -78,6 +74,9 @@ function doPost(e) {
       case 'actualizarDepto':
         result = requireAdmin(body, function () { return actualizarDepto(body); });
         break;
+      case 'activarMes':
+        result = requireAdmin(body, function () { return activarMes(body); });
+        break;
       case 'subirComprobante':
         result = subirComprobante(body);
         break;
@@ -134,15 +133,17 @@ function requireAdmin(body, callback) {
 // ---------------------------------------------------------------------------
 
 function getSpreadsheet() {
-  if (SPREADSHEET_ID) {
-    return SpreadsheetApp.openById(SPREADSHEET_ID);
-  }
-  // Fallback for when running directly from the script editor bound to a sheet
+  // Try bound spreadsheet first (works in script editor)
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  if (!ss) {
-    throw new Error('No se pudo abrir la hoja de calculo. Configura SPREADSHEET_ID en Script Properties.');
+  if (ss) return ss;
+
+  // Web app context: read ID from Script Properties
+  var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  if (id) {
+    return SpreadsheetApp.openById(id);
   }
-  return ss;
+
+  throw new Error('No se pudo abrir la hoja de calculo. Configura SPREADSHEET_ID en Script Properties.');
 }
 
 function getSheet(name) {
@@ -225,24 +226,21 @@ function getDepartamentos() {
 // ---------------------------------------------------------------------------
 
 /**
- * Return the cobro for the current calendar month (YYYY-MM) together with
+ * Return the active cobro (mesActivo === true) together with
  * per-departamento payment status.
  */
 function getCobroActual() {
-  var now = new Date();
-  var mesActual = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM');
-
   var cobros = sheetToObjects(SHEET_COBROS);
   var cobroActual = null;
   for (var i = 0; i < cobros.length; i++) {
-    if (String(cobros[i].mes) === mesActual) {
+    if (cobros[i].mesActivo === true || String(cobros[i].mesActivo) === 'true') {
       cobroActual = cobros[i];
       break;
     }
   }
 
   if (!cobroActual) {
-    return { success: true, data: null, message: 'No hay cobro registrado para el mes actual (' + mesActual + ').' };
+    return { success: true, data: null, message: 'No hay un mes activo. Activa uno desde el panel de administracion.' };
   }
 
   var pagos = sheetToObjects(SHEET_PAGOS);
@@ -282,6 +280,7 @@ function getCobroActual() {
       mes: cobroActual.mes,
       montoBase: cobroActual.montoBase,
       fechaCreacion: cobroActual.fechaCreacion,
+      mesActivo: true,
       departamentos: detalle
     }
   };
@@ -316,6 +315,7 @@ function getHistorico() {
       mes: cobro.mes,
       montoBase: cobro.montoBase,
       fechaCreacion: cobro.fechaCreacion,
+      mesActivo: cobro.mesActivo === true || String(cobro.mesActivo) === 'true',
       pagos: pagosMap[String(cobro.id)] || []
     });
   }
@@ -355,15 +355,57 @@ function crearCobro(body) {
     }
   }
 
+  // Deactivate all existing cobros
+  var sheet = getSheet(SHEET_COBROS);
+  var data = sheet.getDataRange().getValues();
+  for (var r = 1; r < data.length; r++) {
+    sheet.getRange(r + 1, 5).setValue(false); // column E = mesActivo
+  }
+
   var id = Utilities.getUuid();
   var fechaCreacion = new Date().toISOString();
 
-  appendRow(SHEET_COBROS, [id, mes, montoBase, fechaCreacion]);
+  appendRow(SHEET_COBROS, [id, mes, montoBase, fechaCreacion, true]);
 
   return {
     success: true,
-    data: { id: id, mes: mes, montoBase: montoBase, fechaCreacion: fechaCreacion }
+    data: { id: id, mes: mes, montoBase: montoBase, fechaCreacion: fechaCreacion, mesActivo: true }
   };
+}
+
+// ---------------------------------------------------------------------------
+// activarMes (POST — Admin)
+// ---------------------------------------------------------------------------
+
+/**
+ * Set a cobro as the active month (mesActivo = true), deactivating all others.
+ * Body params: cobroId.
+ */
+function activarMes(body) {
+  var cobroId = body.cobroId;
+  if (!cobroId) {
+    return { success: false, error: 'cobroId es obligatorio.' };
+  }
+
+  var sheet = getSheet(SHEET_COBROS);
+  var data = sheet.getDataRange().getValues();
+  var found = false;
+
+  for (var r = 1; r < data.length; r++) {
+    var rowId = String(data[r][0]);
+    if (rowId === String(cobroId)) {
+      sheet.getRange(r + 1, 5).setValue(true);
+      found = true;
+    } else {
+      sheet.getRange(r + 1, 5).setValue(false);
+    }
+  }
+
+  if (!found) {
+    return { success: false, error: 'Cobro no encontrado: ' + cobroId };
+  }
+
+  return { success: true, data: { cobroId: cobroId, mesActivo: true } };
 }
 
 // ---------------------------------------------------------------------------
@@ -718,8 +760,8 @@ function setup() {
   var cobrosSheet = ss.getSheetByName(SHEET_COBROS);
   if (!cobrosSheet) {
     cobrosSheet = ss.insertSheet(SHEET_COBROS);
-    cobrosSheet.appendRow(['id', 'mes', 'montoBase', 'fechaCreacion']);
-    cobrosSheet.getRange(1, 1, 1, 4).setFontWeight('bold');
+    cobrosSheet.appendRow(['id', 'mes', 'montoBase', 'fechaCreacion', 'mesActivo']);
+    cobrosSheet.getRange(1, 1, 1, 5).setFontWeight('bold');
   }
 
   // -- Pagos --
@@ -803,8 +845,9 @@ function seedData() {
   var cobroIds = {};
   for (var m = 0; m < meses.length; m++) {
     var id = Utilities.getUuid();
+    var isActive = (m === meses.length - 1); // only the last month (Mar 2026) is active
     cobroIds[meses[m].mes] = id;
-    appendRow(SHEET_COBROS, [id, meses[m].mes, montoBase, meses[m].fecha.toISOString()]);
+    appendRow(SHEET_COBROS, [id, meses[m].mes, montoBase, meses[m].fecha.toISOString(), isActive]);
   }
   Logger.log('seedData: 4 cobros creados (2025-12 a 2026-03).');
 

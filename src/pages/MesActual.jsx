@@ -75,15 +75,16 @@ function MesActual() {
     return (
       <div className="page-container">
         <div className="empty-state">
-          <h2>Sin cobro activo</h2>
-          <p>No hay un cobro registrado para el mes actual.</p>
-          <p>El administrador debe crear un cobro para este mes desde el panel de administración.</p>
+          <h2>Sin mes activo</h2>
+          <p>No hay un mes activo configurado.</p>
+          <p>El administrador debe activar un mes desde el panel de administración.</p>
         </div>
       </div>
     )
   }
 
-  const pagos = cobro.pagos || []
+  // getCobroActual returns payment info merged into cobro.departamentos, not cobro.pagos
+  const pagos = cobro.departamentos || cobro.pagos || []
   const totalRecaudado = pagos.reduce((sum, p) => sum + (Number(p.montoPagado) || 0), 0)
   const deptosActivos = departamentos.filter((d) => d.activo).length
   const totalEsperado = deptosActivos * (cobro.montoBase || 0)

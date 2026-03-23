@@ -114,16 +114,19 @@ export async function crearCobro(mes, montoBase, password) {
  * @param {number} montoAdeudo - Monto que queda pendiente
  * @param {number} saldoFavorUsado - Saldo a favor utilizado
  * @param {string} password - Contraseña de administrador
+ * @param {string} [status] - "pagado" o "adelanto"
  */
-export async function registrarPago(cobroId, depto, montoPagado, montoAdeudo, saldoFavorUsado, password) {
-  const result = await postAPI('registrarPago', {
+export async function registrarPago(cobroId, depto, montoPagado, montoAdeudo, saldoFavorUsado, password, status) {
+  const body = {
     cobroId,
     depto: Number(depto),
     montoPagado: Number(montoPagado),
     montoAdeudo: Number(montoAdeudo),
     saldoFavorUsado: Number(saldoFavorUsado),
     password,
-  })
+  }
+  if (status) body.status = status
+  const result = await postAPI('registrarPago', body)
   clearCache(CACHE_KEYS.cobroActual)
   clearCache(CACHE_KEYS.historico)
   clearCache(CACHE_KEYS.departamentos)
@@ -147,6 +150,18 @@ export async function actualizarDepto(depto, nombre, telefono, activo, password)
     password,
   })
   clearCache(CACHE_KEYS.departamentos)
+  return result
+}
+
+/**
+ * Activa un cobro como el mes vigente (mesActivo = true), desactivando los demás.
+ * @param {string} cobroId - ID del cobro a activar
+ * @param {string} password - Contraseña de administrador
+ */
+export async function activarMes(cobroId, password) {
+  const result = await postAPI('activarMes', { cobroId, password })
+  clearCache(CACHE_KEYS.cobroActual)
+  clearCache(CACHE_KEYS.historico)
   return result
 }
 
