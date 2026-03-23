@@ -888,6 +888,11 @@ a:hover {
     font-size: 0.78rem;
   }
 
+  .tabla-deptos th:nth-child(2),
+  .tabla-deptos td:nth-child(2) {
+    display: none;
+  }
+
   .accordion-header-info {
     gap: 0.5rem;
     flex-direction: column;
