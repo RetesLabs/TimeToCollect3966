@@ -87,10 +87,8 @@ function Historico() {
         {cobros.map((cobro) => {
           const cobroId = cobro.id || cobro.cobroId || cobro.mes
           const pagos = cobro.pagos || []
-          const totalRecaudado = pagos.reduce(
-            (sum, p) => sum + (Number(p.montoPagado) || 0),
-            0
-          )
+          const deptosPagados = pagos.filter((p) => (p.status || '').toLowerCase() === 'pagado').length
+          const totalRecaudado = deptosPagados * (cobro.montoBase || 0)
           const deptosActivos = departamentos.filter((d) => d.activo).length
           const totalEsperado = deptosActivos * (cobro.montoBase || 0)
           const isExpanded = expandedMonth === cobroId

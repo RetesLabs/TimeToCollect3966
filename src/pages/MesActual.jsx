@@ -69,14 +69,12 @@ function MesActual() {
 
   // getCobroActual returns payment info merged into cobro.departamentos, not cobro.pagos
   const pagos = cobro.departamentos || cobro.pagos || []
-  // Only count "pagado" status towards recaudado, exclude "adelanto"
-  const totalRecaudado = pagos.reduce((sum, p) => {
-    const status = (p.status || '').toLowerCase()
-    if (status === 'pagado') return sum + (Number(p.montoPagado) || 0)
-    return sum
-  }, 0)
+  // Recaudado = number of "pagado" departments × montoBase (exclude adelantos and saldo a favor)
+  const montoBase = cobro.montoBase || 0
+  const deptosPagados = pagos.filter((p) => (p.status || '').toLowerCase() === 'pagado').length
+  const totalRecaudado = deptosPagados * montoBase
   const deptosActivos = departamentos.filter((d) => d.activo).length
-  const totalEsperado = deptosActivos * (cobro.montoBase || 0)
+  const totalEsperado = deptosActivos * montoBase
 
   return (
     <div className="page-container">
@@ -111,7 +109,7 @@ function MesActual() {
       <TablaDeptos
         departamentos={departamentos}
         pagos={pagos}
-        montoBase={cobro.montoBase || 0}
+        montoBase={montoBase}
       />
     </div>
   )

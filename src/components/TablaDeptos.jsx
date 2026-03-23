@@ -64,7 +64,11 @@ function TablaDeptos({ departamentos = [], pagos = [], montoBase = 0, renderActi
                   {formatPesos(pago ? (Number(pago.montoAdeudo) || 0) : montoBase)}
                 </td>
                 <td>{getStatusBadge(pago, dept.activo)}</td>
-                <td>{formatPesos(dept.saldoFavor || 0)}</td>
+                <td>
+                  {dept.saldoFavor > 0
+                    ? <span className="badge badge--saldo">{formatPesos(dept.saldoFavor)}</span>
+                    : '—'}
+                </td>
                 {renderActions && (
                   <td className="tabla-deptos-actions">
                     {renderActions(dept, pago)}
