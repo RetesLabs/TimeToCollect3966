@@ -1,13 +1,44 @@
-import { useCallback } from 'react'
-import { getCobroActual, getDepartamentos } from '../api/sheets'
+import { useCallback, useEffect, useState } from 'react'
+import { getCobroActual, getDepartamentos, getHistorico, getWhatsappTemplate } from '../api/sheets'
 import { CACHE_KEYS } from '../api/cache'
 import useCachedData from '../hooks/useCachedData'
+import { useAuth } from '../context/AuthContext'
 import TablaDeptos from '../components/TablaDeptos'
 import { formatPesos, formatMesAnio } from '../utils/format'
+import { PLANTILLA_DEFAULT, renderMensaje, buildWhatsappUrl } from '../utils/whatsapp'
+
+const COLUMNAS = [
+  { id: 'depto', label: '# Depto' },
+  { id: 'residente', label: 'Residente' },
+  { id: 'porPagar', label: 'Por Pagar' },
+  { id: 'status', label: 'Status' },
+  { id: 'saldoFavor', label: 'Saldo a Favor' },
+]
 
 function MesActual() {
+  const [columnasOcultas, setColumnasOcultas] = useState([])
+  const toggleColumna = (id) =>
+    setColumnasOcultas((prev) =>
+      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
+    )
+  const { isAdmin } = useAuth()
   const fetchCobro = useCallback(() => getCobroActual(), [])
   const fetchDeptos = useCallback(() => getDepartamentos(), [])
+  // Solo admin: plantilla e histórico (para el adeudo de meses pasados).
+  // Se piden sin pasar por el caché para no contaminar claves compartidas.
+  const [plantilla, setPlantilla] = useState('')
+  const [historico, setHistorico] = useState([])
+  useEffect(() => {
+    if (!isAdmin) return undefined
+    let cancelled = false
+    getWhatsappTemplate()
+      .then((t) => { if (!cancelled) setPlantilla(t || '') })
+      .catch(() => {})
+    getHistorico()
+      .then((h) => { if (!cancelled) setHistorico(Array.isArray(h) ? h : []) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [isAdmin])
 
   const {
     data: cobro,
@@ -76,6 +107,56 @@ function MesActual() {
   const deptosActivos = departamentos.filter((d) => d.activo).length
   const totalEsperado = deptosActivos * montoBase
 
+  // Adeudo acumulado de meses pasados por depto (suma de montoAdeudo de cobros anteriores)
+  const adeudoPasadoPorDepto = {}
+  historico.forEach((c) => {
+    if (!c || String(c.mes) >= String(cobro.mes)) return
+    ;(c.pagos || []).forEach((p) => {
+      const key = String(p.depto)
+      adeudoPasadoPorDepto[key] = (adeudoPasadoPorDepto[key] || 0) + (Number(p.montoAdeudo) || 0)
+    })
+  })
+
+  const renderActions = isAdmin
+    ? (dept, pago) => {
+        const telefono = String(dept.telefono ?? '').trim()
+        if (!telefono) {
+          return (
+            <button
+              type="button"
+              className="btn btn--whatsapp"
+              disabled
+              title="Este departamento no tiene teléfono registrado"
+              aria-label={`Sin teléfono registrado para el depto ${dept.depto}`}
+            >
+              WhatsApp
+            </button>
+          )
+        }
+        const mensaje = renderMensaje(plantilla || PLANTILLA_DEFAULT, {
+          nombre: dept.nombre || '',
+          depto: dept.depto,
+          mes: cobro.mes,
+          adeudoMesActual: pago ? (Number(pago.montoAdeudo) || 0) : montoBase,
+          adeudoMesesPasados: adeudoPasadoPorDepto[String(dept.depto)] || 0,
+          saldoFavor: Number(dept.saldoFavor) || 0,
+        })
+        return (
+          <button
+            type="button"
+            className="btn btn--whatsapp"
+            title="Enviar recordatorio por WhatsApp"
+            aria-label={`Enviar recordatorio por WhatsApp al depto ${dept.depto}`}
+            onClick={() =>
+              window.open(buildWhatsappUrl(telefono, mensaje), '_blank', 'noopener,noreferrer')
+            }
+          >
+            WhatsApp
+          </button>
+        )
+      }
+    : undefined
+
   return (
     <div className="page-container">
       {refreshing && <div className="refreshing-bar" />}
@@ -106,10 +187,32 @@ function MesActual() {
         </div>
       </div>
 
+      <div className="columnas-toggle">
+        <span className="columnas-toggle-label">Columnas:</span>
+        {COLUMNAS.map((col) => {
+          const oculta = columnasOcultas.includes(col.id)
+          return (
+            <label
+              key={col.id}
+              className={`columnas-chip${oculta ? ' columnas-chip--off' : ''}`}
+            >
+              <input
+                type="checkbox"
+                checked={!oculta}
+                onChange={() => toggleColumna(col.id)}
+              />
+              {col.label}
+            </label>
+          )
+        })}
+      </div>
+
       <TablaDeptos
         departamentos={departamentos}
         pagos={pagos}
         montoBase={montoBase}
+        columnasOcultas={columnasOcultas}
+        renderActions={renderActions}
       />
     </div>
   )

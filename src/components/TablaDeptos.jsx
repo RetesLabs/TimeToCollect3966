@@ -8,8 +8,12 @@ import { formatPesos } from '../utils/format'
  * - pagos: array de objetos { depto, montoPagado, montoAdeudo, saldoFavorUsado, status }
  * - montoBase: number - monto base del cobro
  * - renderActions: (depto, pago) => ReactNode - render prop para la columna de acciones
+ * - columnasOcultas: array opcional de ids de columnas a no renderizar
+ *   ('depto' | 'residente' | 'porPagar' | 'status' | 'saldoFavor')
  */
-function TablaDeptos({ departamentos = [], pagos = [], montoBase = 0, renderActions }) {
+function TablaDeptos({ departamentos = [], pagos = [], montoBase = 0, renderActions, columnasOcultas = [] }) {
+  const show = (id) => !columnasOcultas.includes(id)
+
   // Index pagos by depto number for quick lookup
   const pagosMap = {}
   pagos.forEach((pago) => {
@@ -40,11 +44,11 @@ function TablaDeptos({ departamentos = [], pagos = [], montoBase = 0, renderActi
       <table className="tabla-deptos">
         <thead>
           <tr>
-            <th># Depto</th>
-            <th>Residente</th>
-            <th>Por Pagar</th>
-            <th>Status</th>
-            <th>Saldo a Favor</th>
+            {show('depto') && <th># Depto</th>}
+            {show('residente') && <th className="col-residente">Residente</th>}
+            {show('porPagar') && <th>Por Pagar</th>}
+            {show('status') && <th>Status</th>}
+            {show('saldoFavor') && <th>Saldo a Favor</th>}
             {renderActions && <th>Acciones</th>}
           </tr>
         </thead>
@@ -58,17 +62,21 @@ function TablaDeptos({ departamentos = [], pagos = [], montoBase = 0, renderActi
                 key={dept.depto}
                 className={isInactive ? 'tabla-deptos-row--inactive' : ''}
               >
-                <td>{dept.depto}</td>
-                <td>{dept.nombre || '—'}</td>
-                <td>
-                  {formatPesos(pago ? (Number(pago.montoAdeudo) || 0) : montoBase)}
-                </td>
-                <td>{getStatusBadge(pago, dept.activo)}</td>
-                <td>
-                  {dept.saldoFavor > 0
-                    ? <span className="badge badge--saldo">{formatPesos(dept.saldoFavor)}</span>
-                    : '—'}
-                </td>
+                {show('depto') && <td>{dept.depto}</td>}
+                {show('residente') && <td className="col-residente">{dept.nombre || '—'}</td>}
+                {show('porPagar') && (
+                  <td>
+                    {formatPesos(pago ? (Number(pago.montoAdeudo) || 0) : montoBase)}
+                  </td>
+                )}
+                {show('status') && <td>{getStatusBadge(pago, dept.activo)}</td>}
+                {show('saldoFavor') && (
+                  <td>
+                    {dept.saldoFavor > 0
+                      ? <span className="badge badge--saldo">{formatPesos(dept.saldoFavor)}</span>
+                      : '—'}
+                  </td>
+                )}
                 {renderActions && (
                   <td className="tabla-deptos-actions">
                     {renderActions(dept, pago)}

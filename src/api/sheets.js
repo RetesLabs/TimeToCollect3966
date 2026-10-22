@@ -166,6 +166,63 @@ export async function activarMes(cobroId, password) {
 }
 
 /**
+ * Obtiene la lista de cobroIds que ya tienen snapshot en la hoja Historico.
+ */
+export async function getHistoricoSnapshots() {
+  const result = await fetchAPI('getHistoricoSnapshots')
+  return Array.isArray(result) ? result : []
+}
+
+/**
+ * Guarda (congela) el snapshot histórico de un cobro. Falla si ya existe.
+ * @param {string} cobroId - ID del cobro
+ * @param {string} password - Contraseña de administrador
+ */
+export async function guardarHistorico(cobroId, password) {
+  const result = await postAPI('guardarHistorico', { cobroId, password })
+  clearCache(CACHE_KEYS.historicoSnapshots)
+  return result
+}
+
+/**
+ * Registra un depósito adelantado que se suma al saldo a favor de un departamento.
+ * @param {string|number} depto - Número de departamento
+ * @param {number} monto - Monto depositado (> 0)
+ * @param {string} nota - Nota opcional
+ * @param {string} password - Contraseña de administrador
+ */
+export async function registrarDeposito(depto, monto, nota, password) {
+  const result = await postAPI('registrarDeposito', {
+    depto: Number(depto),
+    monto: Number(monto),
+    nota: nota || '',
+    password,
+  })
+  clearCache(CACHE_KEYS.departamentos)
+  clearCache(CACHE_KEYS.cobroActual)
+  return result
+}
+
+/**
+ * Obtiene la plantilla del mensaje de WhatsApp (texto). Si no hay, devuelve cadena vacía.
+ */
+export async function getWhatsappTemplate() {
+  const result = await fetchAPI('getWhatsappTemplate')
+  return typeof result?.template === 'string' ? result.template : ''
+}
+
+/**
+ * Guarda la plantilla del mensaje de WhatsApp.
+ * @param {string} template - Texto de la plantilla
+ * @param {string} password - Contraseña de administrador
+ */
+export async function saveWhatsappTemplate(template, password) {
+  const result = await postAPI('saveWhatsappTemplate', { template, password })
+  clearCache(CACHE_KEYS.whatsappTemplate)
+  return result
+}
+
+/**
  * Verifica la contraseña del administrador.
  * @param {string} password - Contraseña a verificar
  */

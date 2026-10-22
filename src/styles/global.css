@@ -254,6 +254,16 @@ a:hover {
   font-size: 0.78rem;
 }
 
+.btn--whatsapp {
+  background: #25d366;
+  color: #fff;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.78rem;
+}
+.btn--whatsapp:hover:not(:disabled) {
+  background: #1ebe5a;
+}
+
 /* ==========================================================================
    Forms
    ========================================================================== */
@@ -444,6 +454,47 @@ a:hover {
 
 .tabla-deptos-actions {
   white-space: nowrap;
+}
+
+/* Selector de columnas visibles (Mes Actual) */
+.columnas-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.columnas-toggle-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 0.25rem;
+}
+
+.columnas-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.columnas-chip input {
+  margin: 0;
+}
+
+.columnas-chip--off {
+  opacity: 0.55;
+  text-decoration: line-through;
 }
 
 /* ==========================================================================
@@ -888,8 +939,8 @@ a:hover {
     font-size: 0.78rem;
   }
 
-  .tabla-deptos th:nth-child(2),
-  .tabla-deptos td:nth-child(2) {
+  .tabla-deptos th.col-residente,
+  .tabla-deptos td.col-residente {
     display: none;
   }
 

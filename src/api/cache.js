@@ -4,6 +4,8 @@ export const CACHE_KEYS = {
   departamentos: `${PREFIX}departamentos`,
   cobroActual: `${PREFIX}cobroActual`,
   historico: `${PREFIX}historico`,
+  historicoSnapshots: `${PREFIX}historicoSnapshots`,
+  whatsappTemplate: `${PREFIX}whatsappTemplate`,
 }
 
 export function getCache(key) {
