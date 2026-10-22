@@ -11,13 +11,21 @@ import {
   registrarPago,
   actualizarDepto,
   activarMes,
+  getHistoricoSnapshots,
+  guardarHistorico,
+  registrarDeposito,
+  getWhatsappTemplate,
+  saveWhatsappTemplate,
 } from '../api/sheets'
 import { formatPesos, formatMesAnio } from '../utils/format'
+import { PLANTILLA_DEFAULT, VARIABLES_WHATSAPP, renderMensaje } from '../utils/whatsapp'
 
 const TABS = [
   { key: 'crear', label: 'Crear Cobro' },
   { key: 'pagos', label: 'Gestionar Pagos' },
   { key: 'deptos', label: 'Gestionar Departamentos' },
+  { key: 'depositos', label: 'Depósitos' },
+  { key: 'whatsapp', label: 'Mensaje WhatsApp' },
 ]
 
 function Admin() {
@@ -54,6 +62,8 @@ function Admin() {
         {activeTab === 'crear' && <TabCrearCobro adminPassword={adminPassword} />}
         {activeTab === 'pagos' && <TabGestionarPagos adminPassword={adminPassword} />}
         {activeTab === 'deptos' && <TabGestionarDeptos adminPassword={adminPassword} />}
+        {activeTab === 'depositos' && <TabDepositos adminPassword={adminPassword} />}
+        {activeTab === 'whatsapp' && <TabMensajeWhatsapp adminPassword={adminPassword} />}
       </div>
     </div>
   )
@@ -63,6 +73,7 @@ function Admin() {
 function TabCrearCobro({ adminPassword }) {
   const [activating, setActivating] = useState(null)
   const [activateMsg, setActivateMsg] = useState(null)
+  const [submitting, setSubmitting] = useState(null)
 
   const fetchHistorico = useCallback(() => getHistorico().catch(() => []), [])
   const {
@@ -70,6 +81,28 @@ function TabCrearCobro({ adminPassword }) {
     loading,
     refetch: refetchH,
   } = useCachedData(CACHE_KEYS.historico, fetchHistorico)
+
+  const fetchSnapshots = useCallback(() => getHistoricoSnapshots().catch(() => []), [])
+  const { data: snapshotsRaw, refetch: refetchS } = useCachedData(
+    CACHE_KEYS.historicoSnapshots,
+    fetchSnapshots,
+  )
+  const snapshotIds = (snapshotsRaw || []).map(String)
+
+  const handleSubmit = async (cobroId, mes) => {
+    setSubmitting(cobroId)
+    setActivateMsg(null)
+    try {
+      await guardarHistorico(cobroId, adminPassword)
+      setActivateMsg({ type: 'success', text: `Histórico de ${formatMesAnio(mes)} guardado.` })
+      refetchS()
+    } catch (err) {
+      setActivateMsg({ type: 'error', text: err.message || 'Error al guardar el histórico.' })
+      refetchS()
+    } finally {
+      setSubmitting(null)
+    }
+  }
 
   const cobros = (() => {
     if (!historicoRaw) return []
@@ -127,6 +160,8 @@ function TabCrearCobro({ adminPassword }) {
                   const cobroId = cobro.id || cobro.cobroId
                   const isActive = cobro.mesActivo === true || cobro.mesActivo === 'true'
                   const isActivating = activating === cobroId
+                  const hasSnapshot = snapshotIds.includes(String(cobroId))
+                  const isSubmitting = submitting === cobroId
 
                   return (
                     <tr key={cobroId}>
@@ -150,6 +185,19 @@ function TabCrearCobro({ adminPassword }) {
                           >
                             {isActivating ? 'Activando...' : 'Activar'}
                           </button>
+                        )}{' '}
+                        <button
+                          className="btn btn--sm btn--primary"
+                          onClick={() => handleSubmit(cobroId, cobro.mes)}
+                          disabled={hasSnapshot || isSubmitting}
+                          title={hasSnapshot ? 'Este mes ya tiene un histórico guardado' : undefined}
+                        >
+                          {isSubmitting ? 'Guardando...' : 'Submit'}
+                        </button>
+                        {hasSnapshot && (
+                          <span className="text-muted" style={{ marginLeft: '0.5rem', fontSize: '0.8rem' }}>
+                            Histórico ya guardado
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -699,6 +747,267 @@ function TabGestionarDeptos({ adminPassword }) {
             })}
           </tbody>
         </table>
+      </div>
+    </div>
+  )
+}
+
+/* --- Tab: Depósitos adelantados --- */
+
+function TabDepositos({ adminPassword }) {
+  const [depto, setDepto] = useState('')
+  const [monto, setMonto] = useState('')
+  const [nota, setNota] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [message, setMessage] = useState(null)
+
+  const fetchDeptos = useCallback(() => getDepartamentos(), [])
+
+  const {
+    data: deptosRaw,
+    loading,
+    refreshing,
+    error,
+    refetch: refetchDeptos,
+  } = useCachedData(CACHE_KEYS.departamentos, fetchDeptos)
+
+  const departamentos = Array.isArray(deptosRaw) ? deptosRaw : (deptosRaw?.departamentos || [])
+  const deptoSel = departamentos.find((d) => String(d.depto) === String(depto))
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setMessage(null)
+
+    if (!depto) {
+      setMessage({ type: 'error', text: 'Selecciona un departamento.' })
+      return
+    }
+    const montoNum = Number(monto)
+    if (!monto || isNaN(montoNum) || montoNum <= 0) {
+      setMessage({ type: 'error', text: 'Ingresa un monto mayor a cero.' })
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      const result = await registrarDeposito(depto, montoNum, nota.trim(), adminPassword)
+      const nuevo = result?.nuevoSaldoFavor
+      setMessage({
+        type: 'success',
+        text: `Depósito de ${formatPesos(montoNum)} registrado para el depto ${depto}.` +
+          (nuevo !== undefined ? ` Nuevo saldo a favor: ${formatPesos(nuevo)}.` : ''),
+      })
+      setMonto('')
+      setNota('')
+      refetchDeptos()
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message || 'Error al registrar el depósito.' })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="loading-spinner">
+        <div className="spinner" />
+        <p>Cargando departamentos...</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="error-message">
+        <p>{error}</p>
+        <button className="btn btn--primary" onClick={refetchDeptos}>Reintentar</button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="nuevo-cobro">
+      {refreshing && <div className="refreshing-bar" />}
+      <h3>Registrar Depósito Adelantado</h3>
+      <form onSubmit={handleSubmit} className="nuevo-cobro-form">
+        <div className="form-group">
+          <label htmlFor="deposito-depto">Departamento:</label>
+          <select
+            id="deposito-depto"
+            value={depto}
+            onChange={(e) => setDepto(e.target.value)}
+            disabled={submitting}
+          >
+            <option value="">Selecciona...</option>
+            {departamentos.map((d) => (
+              <option key={d.depto} value={d.depto}>
+                {d.depto}{d.nombre ? ` - ${d.nombre}` : ''}
+              </option>
+            ))}
+          </select>
+          {deptoSel && (
+            <small>Saldo a favor actual: {formatPesos(deptoSel.saldoFavor || 0)}</small>
+          )}
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="deposito-monto">Monto ($):</label>
+          <input
+            id="deposito-monto"
+            type="number"
+            min="0"
+            step="0.01"
+            value={monto}
+            onChange={(e) => setMonto(e.target.value)}
+            placeholder="Ej: 350.00"
+            disabled={submitting}
+          />
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="deposito-nota">Nota (opcional):</label>
+          <input
+            id="deposito-nota"
+            type="text"
+            value={nota}
+            onChange={(e) => setNota(e.target.value)}
+            placeholder="Ej: Adelanto de 2 meses"
+            disabled={submitting}
+          />
+        </div>
+
+        {message && (
+          <div className={`form-message form-message--${message.type}`}>
+            {message.text}
+          </div>
+        )}
+
+        <button type="submit" className="btn btn--primary" disabled={submitting}>
+          {submitting ? 'Registrando...' : 'Registrar Depósito'}
+        </button>
+      </form>
+    </div>
+  )
+}
+
+/* --- Tab: Mensaje WhatsApp --- */
+
+const VALORES_EJEMPLO = {
+  nombre: 'Juan Pérez',
+  depto: 3,
+  mes: '2025-03',
+  adeudoMesActual: 350,
+  adeudoMesesPasados: 700,
+  saldoFavor: 200,
+}
+
+function TabMensajeWhatsapp({ adminPassword }) {
+  const [plantilla, setPlantilla] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState(null)
+
+  const fetchPlantilla = useCallback(() => getWhatsappTemplate(), [])
+
+  const {
+    data: guardada,
+    loading,
+    refreshing,
+    error,
+    refetch,
+  } = useCachedData(CACHE_KEYS.whatsappTemplate, fetchPlantilla)
+
+  // Valor mostrado: lo editado, o lo guardado, o el default
+  const valorGuardado = typeof guardada === 'string' && guardada ? guardada : PLANTILLA_DEFAULT
+  const texto = plantilla ?? valorGuardado
+
+  const handleGuardar = async () => {
+    setMessage(null)
+    if (!texto.trim()) {
+      setMessage({ type: 'error', text: 'La plantilla no puede estar vacía.' })
+      return
+    }
+    setSaving(true)
+    try {
+      await saveWhatsappTemplate(texto, adminPassword)
+      setMessage({ type: 'success', text: 'Plantilla guardada correctamente.' })
+      setPlantilla(null)
+      refetch()
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message || 'Error al guardar la plantilla.' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleRestaurar = () => {
+    setMessage(null)
+    setPlantilla(PLANTILLA_DEFAULT)
+  }
+
+  if (loading) {
+    return (
+      <div className="loading-spinner">
+        <div className="spinner" />
+        <p>Cargando plantilla...</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="error-message">
+        <p>{error}</p>
+        <button className="btn btn--primary" onClick={refetch}>Reintentar</button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="nuevo-cobro">
+      {refreshing && <div className="refreshing-bar" />}
+      <h3>Mensaje de WhatsApp</h3>
+
+      <div className="form-group">
+        <label htmlFor="whatsapp-plantilla">Plantilla:</label>
+        <textarea
+          id="whatsapp-plantilla"
+          rows={5}
+          value={texto}
+          onChange={(e) => setPlantilla(e.target.value)}
+          disabled={saving}
+          style={{ width: '100%' }}
+        />
+      </div>
+
+      <div className="form-group">
+        <label>Variables disponibles:</label>
+        <ul>
+          {VARIABLES_WHATSAPP.map((v) => (
+            <li key={v.variable}>
+              <code>{v.variable}</code> — {v.descripcion}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="form-group">
+        <label>Vista previa (con valores de ejemplo):</label>
+        <p style={{ whiteSpace: 'pre-wrap' }}>{renderMensaje(texto, VALORES_EJEMPLO)}</p>
+      </div>
+
+      {message && (
+        <div className={`form-message form-message--${message.type}`}>
+          {message.text}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <button className="btn btn--primary" onClick={handleGuardar} disabled={saving}>
+          {saving ? 'Guardando...' : 'Guardar'}
+        </button>
+        <button className="btn" onClick={handleRestaurar} disabled={saving}>
+          Restaurar plantilla por defecto
+        </button>
       </div>
     </div>
   )
